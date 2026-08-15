@@ -1,6 +1,10 @@
 (function () {
   'use strict';
 
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- масштабирование холста ---------- */
+
   function fitStage() {
     var stage = document.querySelector('.stage');
     var canvas = document.querySelector('.canvas');
@@ -28,52 +32,192 @@
   window.addEventListener('load', fitStage);
   fitStage();
 
-  function initReveal() {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    var ease = 'cubic-bezier(.22,.61,.36,1)';
-    var groups = [].slice.call(document.querySelectorAll('section[data-screen-label]'))
-      .concat([].slice.call(document.querySelectorAll('section > div[data-reveal-group]')))
-      .concat([].slice.call(document.querySelectorAll('section > div > div[data-reveal-group]')));
-    var seen = new Set();
+  /* ---------- пословное появление заголовков ---------- */
+
+  // Каждое слово оборачивается в маску с внутренним span, который выезжает снизу.
+  // Обход рекурсивный, чтобы сохранить <br> и вложенные span'ы с их стилями.
+  function splitWords(root) {
+    var words = [];
+    (function walk(node) {
+      [].slice.call(node.childNodes).forEach(function (child) {
+        if (child.nodeType === 3) {
+          var frag = document.createDocumentFragment();
+          child.nodeValue.split(/(\s+)/).forEach(function (part) {
+            if (!part) return;
+            if (/^\s+$/.test(part)) { frag.appendChild(document.createTextNode(part)); return; }
+            var mask = document.createElement('span');
+            mask.className = 'word';
+            var inner = document.createElement('span');
+            inner.textContent = part;
+            mask.appendChild(inner);
+            frag.appendChild(mask);
+            words.push(inner);
+          });
+          node.replaceChild(frag, child);
+        } else if (child.nodeType === 1 && child.tagName !== 'BR') {
+          walk(child);
+        }
+      });
+    })(root);
+    return words;
+  }
+
+  function prepareHeadline(el, step) {
+    if (!el || reduced) return;
+    splitWords(el).forEach(function (word, i) {
+      word.style.setProperty('--d', (i * (step || 60)) + 'ms');
+    });
+    el.setAttribute('data-words', '');
+  }
+
+  function playHeadline(el) {
+    if (el) el.classList.add('is-typed');
+  }
+
+  /* ---------- первый экран: анимация загрузки ---------- */
+
+  function prepareIntro() {
+    var hero = document.querySelector('section[data-screen-label]');
+    if (!hero) return function () {};
+
+    var headline = hero.querySelector('h1');
+    prepareHeadline(headline, 70);
+
+    // Текстовые блоки первого экрана — обёртки, поэтому анимируем их содержимое,
+    // иначе весь столбец всплывал бы одним куском.
     var targets = [];
-    groups.forEach(function (g) {
-      [].slice.call(g.children).forEach(function (el, i) {
-        if (seen.has(el) || !(el instanceof HTMLElement)) return;
-        if (getComputedStyle(el).position === 'fixed') return;
+    [].slice.call(hero.children).forEach(function (child) {
+      var kids = [].slice.call(child.children);
+      if (child.tagName === 'DIV' && kids.length > 1 && !child.classList.contains('social-rail')) {
+        targets = targets.concat(kids);
+      } else {
+        targets.push(child);
+      }
+    });
+    targets = targets.filter(function (el) { return el !== headline; });
+
+    if (reduced) return function () {};
+
+    targets.forEach(function (el, i) {
+      el.setAttribute('data-reveal', '');
+      el.style.setProperty('--d', Math.min(i, 10) * 70 + 'ms');
+    });
+
+    return function () {
+      targets.forEach(function (el) { el.classList.add('is-in'); });
+      playHeadline(headline);
+    };
+  }
+
+  /* ---------- появление при скролле ---------- */
+
+  function initScrollReveal() {
+    var sections = [].slice.call(document.querySelectorAll('section[data-screen-label]')).slice(1);
+    var headlines = [];
+    var targets = [];
+    var seen = new Set();
+
+    sections.forEach(function (section) {
+      var h = section.querySelector(':scope > h2');
+      if (h) { prepareHeadline(h, 45); headlines.push(h); }
+      [].slice.call(section.children).forEach(function (el) {
+        if (el === h || seen.has(el)) return;
         seen.add(el);
-        el.style.opacity = '0';
-        el.style.transform = 'translateY(12px)';
-        el.style.transition = 'opacity 420ms ' + ease + ', transform 420ms ' + ease;
-        el.style.transitionDelay = Math.min(i, 6) * 40 + 'ms';
         targets.push(el);
       });
     });
-    var show = function (el) { el.style.opacity = '1'; el.style.transform = 'none'; };
-    var pending = new Set(targets);
-    var onScroll = null;
-    var sweep = function () {
-      pending.forEach(function (el) {
-        var r = el.getBoundingClientRect();
-        if (r.top < window.innerHeight - 40 && r.bottom > 0) { show(el); pending.delete(el); }
+
+    [].slice.call(document.querySelectorAll('[data-reveal-group]')).forEach(function (group) {
+      [].slice.call(group.children).forEach(function (el) {
+        if (seen.has(el)) return;
+        seen.add(el);
+        targets.push(el);
       });
-      if (!pending.size && onScroll) {
-        window.removeEventListener('scroll', onScroll);
-        onScroll = null;
-      }
+    });
+
+    if (reduced) { headlines.forEach(playHeadline); return; }
+
+    targets.forEach(function (el) {
+      el.setAttribute('data-reveal', '');
+      var siblings = [].slice.call(el.parentNode.children);
+      el.style.setProperty('--d', Math.min(siblings.indexOf(el), 6) * 60 + 'ms');
+    });
+
+    var show = function (el) {
+      el.classList.add('is-in');
+      if (el.hasAttribute('data-words')) playHeadline(el);
     };
+    var watched = targets.concat(headlines);
+
+    if (!('IntersectionObserver' in window)) {
+      watched.forEach(show);
+      return;
+    }
+
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        show(entry.target);
+        io.unobserve(entry.target);
+      });
+    }, { rootMargin: '0px 0px -10% 0px', threshold: 0.04 });
+
+    watched.forEach(function (el) { io.observe(el); });
+
+    // Страховка: если что-то так и не попало в наблюдатель, показываем принудительно.
+    setTimeout(function () { watched.forEach(show); }, 8000);
+  }
+
+  /* ---------- индикатор прокрутки ---------- */
+
+  function initScrollProgress() {
+    var bar = document.querySelector('.scroll-progress');
+    if (!bar) return;
     var ticking = false;
-    onScroll = function () {
+    var update = function () {
+      var max = document.documentElement.scrollHeight - window.innerHeight;
+      var progress = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+      bar.style.transform = 'scaleX(' + progress + ')';
+      bar.classList.toggle('is-active', window.scrollY > 8);
+    };
+    var onScroll = function () {
       if (ticking) return;
       ticking = true;
-      requestAnimationFrame(function () { ticking = false; sweep(); });
+      requestAnimationFrame(function () { ticking = false; update(); });
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll, { passive: true });
-    sweep();
-    setTimeout(function () { pending.forEach(show); pending.clear(); }, 6000);
+    update();
   }
 
-  requestAnimationFrame(function () { requestAnimationFrame(initReveal); });
+  /* ---------- запуск ---------- */
+
+  var startIntro = prepareIntro();
+  initScrollReveal();
+  initScrollProgress();
+
+  var started = false;
+  function start() {
+    if (started) return;
+    started = true;
+    fitStage();
+    var veil = document.querySelector('.page-veil');
+    if (veil) {
+      veil.classList.add('is-gone');
+      setTimeout(function () { if (veil.parentNode) veil.parentNode.removeChild(veil); }, 700);
+    }
+    requestAnimationFrame(startIntro);
+  }
+
+  // Ждём шрифт: иначе слова заголовка успевают переехать до подмены Poppins.
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(start);
+  } else {
+    window.addEventListener('load', start);
+  }
+  setTimeout(start, 1500);
+
+  /* ---------- плавный переход по якорям ---------- */
 
   document.addEventListener('click', function (e) {
     var a = e.target.closest('a[href^="#"]');
@@ -83,10 +227,11 @@
     if (!sec) return;
     e.preventDefault();
     var top = sec.getBoundingClientRect().top + window.scrollY - 96;
-    window.scrollTo({ top: top, behavior: 'smooth' });
+    window.scrollTo({ top: top, behavior: reduced ? 'auto' : 'smooth' });
     document.querySelectorAll('nav a[href^="#"]').forEach(function (l) {
       l.style.color = l === a ? '#fff' : '#A9A9A9';
     });
+    if (reduced) return;
     sec.style.animation = 'none';
     void sec.offsetWidth;
     sec.style.animation = 'sectionPulse 420ms cubic-bezier(.22,.61,.36,1) both';
