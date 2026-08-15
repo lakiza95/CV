@@ -190,9 +190,91 @@
     update();
   }
 
+  /* ---------- инерционный скролл ---------- */
+
+  // Колесо перехватывается, страница каждый кадр подтягивается к цели. Позиция
+  // задаётся обычным scrollTo, а не трансформом контента, — иначе перестали бы
+  // работать sticky-шапка и наблюдатель появления блоков.
+  // Касания не трогаем: у мобильных браузеров своя инерция, и она лучше.
+  function initSmoothScroll() {
+    if (reduced) return null;
+
+    var target = window.scrollY;
+    var current = target;
+    var raf = null;
+    var last = 0;
+    var started = 0;
+    var EASE = 0.11;
+    var clock = (window.performance && performance.now) ? function () { return performance.now(); } : null;
+
+    function limit() {
+      return Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    }
+
+    function step(now) {
+      // Для первого кадра шаг считаем от момента запуска, а не берём 16.7 «на глаз»:
+      // иначе старт каждого жеста уезжает на экранах не с 60 Гц.
+      var dt = last ? Math.min(64, now - last)
+                    : Math.min(64, started ? Math.max(1, now - started) : 16.7);
+      last = now;
+      // Поправка на длительность кадра: путь за единицу времени одинаков при любом fps.
+      var k = 1 - Math.pow(1 - EASE, dt / 16.7);
+      current += (target - current) * k;
+      if (Math.abs(target - current) < 0.4) current = target;
+      window.scrollTo(0, current);
+      if (current === target) { raf = null; last = 0; started = 0; return; }
+      raf = requestAnimationFrame(step);
+    }
+
+    function to(y) {
+      target = Math.min(Math.max(0, y), limit());
+      if (raf === null) {
+        last = 0;
+        started = clock ? clock() : 0;
+        raf = requestAnimationFrame(step);
+      }
+    }
+    function by(dy) { to(target + dy); }
+
+    window.addEventListener('wheel', function (e) {
+      if (e.ctrlKey || e.metaKey) return;                   // масштабирование страницы
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;  // горизонтальный жест
+      e.preventDefault();
+      var d = e.deltaY;
+      if (e.deltaMode === 1) d *= 16;                       // дельта в строках
+      else if (e.deltaMode === 2) d *= window.innerHeight;  // дельта в экранах
+      by(d);
+    }, { passive: false });
+
+    var STEPS = { PageDown: .9, PageUp: -.9, ArrowDown: .12, ArrowUp: -.12 };
+    window.addEventListener('keydown', function (e) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable]')) return;
+      if (e.key === 'Home') { e.preventDefault(); to(0); return; }
+      if (e.key === 'End') { e.preventDefault(); to(limit()); return; }
+      var f = e.key === ' ' ? (e.shiftKey ? -.9 : .9) : STEPS[e.key];
+      if (f === undefined) return;
+      e.preventDefault();
+      by(f * window.innerHeight);
+    });
+
+    // Прокрутка мимо нас — полосой, поиском по странице — подхватываем позицию.
+    window.addEventListener('scroll', function () {
+      if (raf === null) { target = current = window.scrollY; }
+    }, { passive: true });
+
+    window.addEventListener('resize', function () {
+      target = Math.min(target, limit());
+      if (raf === null) current = window.scrollY;
+    }, { passive: true });
+
+    return { to: to };
+  }
+
   /* ---------- запуск ---------- */
 
   var startIntro = prepareIntro();
+  var smooth = initSmoothScroll();
   initScrollReveal();
   initScrollProgress();
 
@@ -227,7 +309,8 @@
     if (!sec) return;
     e.preventDefault();
     var top = sec.getBoundingClientRect().top + window.scrollY - 96;
-    window.scrollTo({ top: top, behavior: reduced ? 'auto' : 'smooth' });
+    if (smooth) smooth.to(top);
+    else window.scrollTo({ top: top, behavior: reduced ? 'auto' : 'smooth' });
     document.querySelectorAll('nav a[href^="#"]').forEach(function (l) {
       l.style.color = l === a ? '#fff' : '#A9A9A9';
     });
