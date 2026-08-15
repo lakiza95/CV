@@ -6,14 +6,18 @@
     var canvas = document.querySelector('.canvas');
     if (!stage || !canvas) return;
     canvas.style.transform = '';
+    canvas.style.margin = '';
     var natural = canvas.getBoundingClientRect().height;
-    var scale = Math.min(1, window.innerWidth / 1440);
-    if (scale < 1) {
-      canvas.style.transform = 'scale(' + scale + ')';
-      stage.style.height = (natural * scale) + 'px';
-    } else {
+    // clientWidth, not innerWidth: excludes the scrollbar, so the canvas never overflows.
+    var scale = (document.documentElement.clientWidth || window.innerWidth) / 1440;
+    if (scale === 1) {
       stage.style.height = '';
+      return;
     }
+    // transform-origin is top left, so the auto margins must go or the canvas drifts right.
+    canvas.style.margin = '0';
+    canvas.style.transform = 'scale(' + scale + ')';
+    stage.style.height = (natural * scale) + 'px';
   }
 
   var resizeRaf = null;
