@@ -118,6 +118,29 @@ section[id] { scroll-margin-top: 96px; }
   }
 }
 
+/* Второй слой — вне бейджа, поэтому не подрезается: размытое пятно едет по тому
+   же пути с той же длительностью и выносит свет наружу. z-index держит его под
+   бейджем, иначе оно замыливало бы текст. */
+/* flex, а не inline-flex: у бейджа overflow:hidden, поэтому его базовая линия
+   синтезируется по нижнему краю, и строчная обёртка уезжала бы вниз. */
+.badge-beam-wrap { position: relative; display: flex; width: fit-content; }
+
+@supports (offset-path: rect(0 auto auto 0 round 23px)) {
+  .badge-beam-wrap::after {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    width: 96px;
+    height: 14px;
+    pointer-events: none;
+    background: radial-gradient(closest-side, rgba(61,220,132,.9), rgba(61,220,132,.35) 55%, rgba(61,220,132,0) 100%);
+    filter: blur(7px);
+    offset-path: rect(0 auto auto 0 round 23px);
+    offset-distance: 0%;
+    animation: badgeBeam 7s linear infinite;
+  }
+}
+
 @keyframes badgeBeam { to { offset-distance: 100%; } }
 
 @media (prefers-reduced-motion: reduce) {
@@ -127,5 +150,5 @@ section[id] { scroll-margin-top: 96px; }
   .scroll-progress { transition: none; }
   [data-reveal], [data-reveal].is-in { opacity: 1; transform: none; transition: none; }
   .word > span { transform: none; transition: none; }
-  .badge-beam::after { display: none; }
+  .badge-beam::after, .badge-beam-wrap::after { display: none; }
 }
