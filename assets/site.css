@@ -2,7 +2,8 @@
 
 :root { --ease: cubic-bezier(.22,.61,.36,1); }
 
-html { scroll-behavior: smooth; }
+/* Без scroll-behavior: smooth — прокруткой управляет скрипт, покадрово подтягивая
+   позицию к цели. Браузерная анимация поверх этого дала бы борьбу двух движений. */
 body { margin: 0; background: #000; font-family: 'Poppins', sans-serif; -webkit-font-smoothing: antialiased; }
 a { color: #1DC9ED; text-decoration: none; }
 a:hover { color: #6FE3F5; }
@@ -144,7 +145,6 @@ section[id] { scroll-margin-top: 96px; }
 @keyframes badgeBeam { to { offset-distance: 100%; } }
 
 @media (prefers-reduced-motion: reduce) {
-  html { scroll-behavior: auto; }
   .glow-field { animation: none; }
   .page-veil { transition: none; }
   .scroll-progress { transition: none; }
